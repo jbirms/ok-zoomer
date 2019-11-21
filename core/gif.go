@@ -94,18 +94,22 @@ func main() {
 	if err != nil {
 		panic("had trouble decoding inFile: " + err.Error())
 	}
-	const delay = 30
+	const delay = 5
 
 	origQuantized := image.NewPaletted(origImg.Bounds(), palette.Plan9)
 	floydSteinbergDitherer.Quantize(origImg, origQuantized, 256, true, true)
 	anim := gif.GIF{LoopCount: numFrames * 2}
 	anim.Image = append(anim.Image, origQuantized)
 	anim.Delay = append(anim.Delay, delay)
-	faceBounds, err := getBoundsWithAspectRatio(origImg.Bounds(), image.Rect(10, 10, 100, 200))
+	bestFaceRect, err := GetLargestFaceRect(origImg)
+	if err != nil {
+		panic("had trouble detecting faces in the image: " + err.Error())
+	}
+	scaledFaceBounds, err := getBoundsWithAspectRatio(origImg.Bounds(), bestFaceRect)
 	if err != nil {
 		panic("had trouble getting scaled bounds: " + err.Error())
 	}
-	rects := getIntermediateRects(origImg.Bounds(), faceBounds, numFrames / 2 - 1)
+	rects := getIntermediateRects(origImg.Bounds(), scaledFaceBounds, numFrames / 2 - 1)
 	log.Printf("we have %v rectangles", len(rects))
 
 	for i, rect := range rects {
