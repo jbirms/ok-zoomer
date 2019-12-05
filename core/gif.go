@@ -1,6 +1,7 @@
 package main
 
 import (
+	"fmt"
 	"github.com/esimov/colorquant"
 	"image"
 	"image/color/palette"
@@ -8,9 +9,13 @@ import (
 	_ "image/png"
 	"log"
 	"os"
+	"reflect"
 	"strconv"
-	"strings"
+	"sync"
+	"time"
 )
+
+const minLoggedDuration = time.Millisecond * 10 // we don't care about logging things that take <.01s
 
 var floydSteinbergDitherer = colorquant.Dither{
 	Filter: [][]float32{
@@ -28,7 +33,6 @@ func getIntermediateRects(origBounds, faceBounds image.Rectangle, nFrames int) [
 	dx2 := float64(origBounds.Max.X - faceBounds.Max.X) / floatNumFrames
 	dy1 := float64(faceBounds.Min.Y - origBounds.Min.Y) / floatNumFrames
 	dy2 := float64(origBounds.Max.Y - faceBounds.Max.Y) / floatNumFrames
-	log.Printf("dx1: %v, dx2: %v, dy1: %v, dy2: %v", dx1, dx2, dy1, dy2)
 	for i := float64(1); i <= floatNumFrames; i++ {
 		rects = append(rects, image.Rect(
 			int(float64(origBounds.Min.X) + i * dx1),
@@ -37,105 +41,117 @@ func getIntermediateRects(origBounds, faceBounds image.Rectangle, nFrames int) [
 			int(float64(origBounds.Max.Y) - i * dy2),
 			))
 	}
-	// TODO: append the reverse too for looping behavior
-	// TODO: well actually, do that after the cropping / zooming to prevent duplication of work
 	return rects
 }
 
-// TODO: share the logic between these 2 funcs
-func reverseDelays(a []int) []int {
-	out := make([]int, len(a))
-	for i := len(a)-1; i >= 0; i-- {
-		opp := len(a)-1-i
-		out[i] = a[opp]
+func panicIfError(err error, panicString string) {
+	if err != nil {
+		panic(panicString + ": " + err.Error())
 	}
-	return out
 }
 
-func reverseImages(a []*image.Paletted) []*image.Paletted {
-	out := make([]*image.Paletted, len(a))
-	for i := len(a)-1; i >= 0; i-- {
-		opp := len(a)-1-i
-		out[i] = a[opp]
+func logCheckpointTime(startTime time.Time, checkpoint *time.Duration, eventMsg string) {
+	dur := time.Since(startTime) - *checkpoint
+	if dur > minLoggedDuration {
+		log.Printf("ran %s in %vs", eventMsg, dur.Seconds())
 	}
-	return out
+	*checkpoint = time.Since(startTime)
 }
 
-// take an anim, and appends itself in reverse, creating a smooth loop
-func loopAndReverse(anim gif.GIF) gif.GIF {
-	var resolutions []string
-	for _, res := range anim.Image {
-		if res == nil {
-			resolutions = append(resolutions, "nil")
-		} else {
-			resolutions = append(resolutions, res.Bounds().String())
-		}
-	}
-	log.Printf("before reversing, resolutions: %s", strings.Join(resolutions, ", "))
-	reversedImages := reverseImages(anim.Image)
-	anim.Image = append(anim.Image, reversedImages...)
-	reversedDelays := reverseDelays(anim.Delay)
-	anim.Delay = append(anim.Delay, reversedDelays...)
-	log.Printf("delays: %v", anim.Delay)
-	return anim
-}
-
+// TODO: make this take a flag for finding the n best faces, and concatting the gifs
 func main() {
+	startTime := time.Now()
+	log.Println("starting")
+	if len(os.Args) != 3 {
+		panic("usage: gif.go $IN_FILE $NUM_FRAMES")
+	}
 	inFile, err := os.Open(os.Args[1])
-	if err != nil {
-		panic("had trouble opening inFile: " + err.Error())
-	}
+	panicIfError(err, "had trouble opening inFile")
 	numFrames, err := strconv.Atoi(os.Args[2])
-	if err != nil {
-		panic("couldn't convert numFrames arg to int:  "+ err.Error())
-	}
+	panicIfError(err, "couldn't convert numFrames arg to int")
 	defer inFile.Close()
 	origImg, _, err := image.Decode(inFile)
-	if err != nil {
-		panic("had trouble decoding inFile: " + err.Error())
-	}
+	panicIfError(err, "had trouble decoding inFile")
 	const delay = 5
+
+	checkpoint := time.Since(startTime)
 
 	origQuantized := image.NewPaletted(origImg.Bounds(), palette.Plan9)
 	floydSteinbergDitherer.Quantize(origImg, origQuantized, 256, true, true)
-	anim := gif.GIF{LoopCount: numFrames * 2}
-	anim.Image = append(anim.Image, origQuantized)
-	anim.Delay = append(anim.Delay, delay)
-	bestFaceRect, err := GetLargestFaceRect(origImg)
-	if err != nil {
-		panic("had trouble detecting faces in the image: " + err.Error())
+	logCheckpointTime(startTime, &checkpoint, "quantization / dithering of input image")
+	//colorquant.NoDither.Quantize(origImg, origQuantized, 256, false, true)
+	if reflect.DeepEqual(origQuantized.Palette, palette.Plan9) {
+		log.Printf("the quantized image still has the Plan9 palette! SAD!")
 	}
+	anim := gif.GIF{LoopCount: numFrames} // TODO: multiply this by numFaces
+	anim.Image = make([]*image.Paletted, numFrames)
+	anim.Delay = make([]int, numFrames)
+	// put the original image at the start and end
+	anim.Image[0] = origQuantized
+	anim.Image[numFrames - 1] = origQuantized
+	for i := 0; i < numFrames; i++ {
+		anim.Delay[i] = delay
+	}
+
+	bestFaceRect, err := GetBestFaceRect(origImg)
+	logCheckpointTime(startTime, &checkpoint, "face detection")
+	panicIfError(err, "had trouble detecting faces in the image")
 	scaledFaceBounds, err := getBoundsWithAspectRatio(origImg.Bounds(), bestFaceRect)
-	if err != nil {
-		panic("had trouble getting scaled bounds: " + err.Error())
-	}
+	panicIfError(err, "had trouble getting scaled bounds")
 	rects := getIntermediateRects(origImg.Bounds(), scaledFaceBounds, numFrames / 2 - 1)
-	log.Printf("we have %v rectangles", len(rects))
 
+	checkpoint = time.Since(startTime)
+	wg := new(sync.WaitGroup)
+	cropResults := make(chan CropResult, len(rects))
 	for i, rect := range rects {
-		log.Printf("rect #%v: %s", i, rect)
-		croppedImg, err := Crop(origImg, rect)
-		if err != nil {
-			panic("had trouble cropping: " + err.Error())
-		}
-		resized := Resize(croppedImg, origImg.Bounds())
-
-		quantized := image.NewPaletted(resized.Bounds(), palette.Plan9)
-		floydSteinbergDitherer.Quantize(resized, quantized, 256, true, true)
-		anim.Image = append(anim.Image, quantized)
-		anim.Delay = append(anim.Delay, delay)
+		wg.Add(1)
+		go cropAndResize(&cropResults, wg, i, numFrames, rect, origQuantized)
 	}
-
-	anim = loopAndReverse(anim)
+	go func(wg *sync.WaitGroup, results chan CropResult) {
+		wg.Wait()
+		close(results)
+	}(wg, cropResults)
+	for result := range cropResults {
+		for _, index := range result.indices {
+			anim.Image[index] = result.img
+		}
+	}
+	logCheckpointTime(startTime, &checkpoint, "concurrently created intermediate images")
 
 	outFile, err := os.Create("/tmp/test.gif")
-	if err != nil {
-		panic("had trouble opening outFile: " + err.Error())
-	}
+	panicIfError(err, "had trouble opening outFile")
 	defer outFile.Close()
 
 	err = gif.EncodeAll(outFile, &anim)
-	if err != nil {
-		panic("had trouble encoding outFile as gif: " + err.Error())
-	}
+	logCheckpointTime(startTime, &checkpoint, "created and encoded gif file")
+	panicIfError(err, "had trouble encoding outFile as gif")
+	log.Printf("finished in %vs", time.Since(startTime).Seconds())
+}
+
+type CropResult struct {
+	// the indices in the gif in which to place the cropped / resized image
+	indices []int
+	img *image.Paletted
+}
+
+func cropAndResize(
+	results *chan CropResult,
+	wg *sync.WaitGroup,
+	origIdx,
+	totalFrames int,
+	cropTo image.Rectangle,
+	origImg *image.Paletted) {
+	defer wg.Done()
+	funcStart := time.Now()
+	log.Printf("rect #%v: %s", origIdx, cropTo)
+	croppedImg, err := Crop(origImg, cropTo)
+	checkpoint := time.Since(funcStart)
+	logCheckpointTime(funcStart, &checkpoint, fmt.Sprintf("crop #%v", origIdx))
+	panicIfError(err, "had trouble cropping")
+	resized := Resize(croppedImg, origImg.Bounds())
+	logCheckpointTime(funcStart, &checkpoint, fmt.Sprintf("resize #%v", origIdx))
+	// we already have the full size image at the first and last index
+	reverseIndex := totalFrames - 2 - origIdx
+	*results <- CropResult{indices: []int{origIdx + 1, reverseIndex}, img: resized}
+	log.Printf("ran cropAndResize for img #%v in %vs", origIdx, time.Since(funcStart).Seconds())
 }

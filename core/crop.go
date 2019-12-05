@@ -4,13 +4,14 @@ package main
 
 import (
 	"fmt"
-	"github.com/nfnt/resize"
+	"golang.org/x/image/draw"
 	"image"
-	"image/draw"
+	"image/color/palette"
 	"log"
 )
 
-var blankImage = image.NewRGBA(image.Rectangle{})
+//var blankImage = image.NewRGBA(image.Rectangle{})
+var blankPaletted = image.NewPaletted(image.Rectangle{}, palette.Plan9)
 
 func getBoundsWithAspectRatio(oldBounds, newBounds image.Rectangle) (image.Rectangle, error) {
 	// assert that newBounds is inside oldBounds
@@ -31,7 +32,6 @@ func getBoundsWithAspectRatio(oldBounds, newBounds image.Rectangle) (image.Recta
 	if newAspectRatio > oldAspectRatio {
 		// use y from newBounds and scale x to preserve aspect ratio
 		xShift := int((newAspectRatio / oldAspectRatio * float64(newBounds.Dx()) - float64(newBounds.Dx())) / 2)
-		log.Printf("xShift: %v", xShift)
 		scaledNewBounds = image.Rect(
 			newBounds.Min.X - xShift,
 			newBounds.Min.Y,
@@ -68,25 +68,29 @@ func getBoundsWithAspectRatio(oldBounds, newBounds image.Rectangle) (image.Recta
 	}
 }
 
-func Crop(img image.Image, newBounds image.Rectangle) (image.Image, error) {
+func Crop(img *image.Paletted, newBounds image.Rectangle) (*image.Paletted, error) {
 	bounds := img.Bounds()
-	log.Printf("the bounds of the original image are %s", bounds)
 
 	if !newBounds.In(bounds) {
-		return blankImage, fmt.Errorf("newBounds not within bounds of original image, newBounds: " + newBounds.String())
+		return blankPaletted, fmt.Errorf("newBounds not within bounds of original image, newBounds: " + newBounds.String())
 	}
 
-	//newImage := image.NewPaletted(newBounds, palette.Plan9)
-	newImage := image.NewRGBA(newBounds)
+	//newImage := image.NewRGBA(newBounds)
+	newImage := image.NewPaletted(newBounds, img.Palette)
+	//draw.Draw(newImage, newImage.Bounds(), img, newBounds.Min, draw.Src)
 	draw.Draw(newImage, newImage.Bounds(), img, newBounds.Min, draw.Src)
-
-	log.Printf("the bounds of the new image are %s", newBounds)
 
 	return newImage, nil
 }
 
-func Resize(img image.Image, bounds image.Rectangle) image.Image{
-	return resize.Resize(uint(bounds.Dx()), uint(bounds.Dy()), img, resize.Lanczos2)
+func Resize(img *image.Paletted, bounds image.Rectangle) *image.Paletted {
+	dst := image.NewPaletted(bounds, img.Palette)
+	//draw.FloydSteinberg.Draw(dst, bounds, img, image.Point{0, 0})
+	//draw.ApproxBiLinear.Scale(dst, bounds, img, img.Bounds(), draw.Over, nil)
+	draw.NearestNeighbor.Scale(dst, bounds, img, img.Bounds(), draw.Over, nil)
+	return dst
+	//resized := resize.Resize(uint(bounds.Dx()), uint(bounds.Dy()), img, resize.Lanczos2)
+	//resizedPaletted, ok := resized.(image.Paletted)
 }
 
 //func main() {

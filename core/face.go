@@ -2,16 +2,14 @@ package main
 
 import (
 	pigo "github.com/esimov/pigo/core"
-	//"github.com/esimov/pigo/wasm/detector"
 	"image"
 	"io/ioutil"
 	"log"
+	"sort"
 )
 
-func GetLargestFaceRect(img image.Image) (image.Rectangle, error) {
-	//det := detector.NewDetector()
-
-	//cascade, err := det.FetchCascade("https://raw.githubusercontent.com/esimov/pigo/master/cascade/facefinder")
+// TODO: make this return a slice of the N best face rects
+func GetBestFaceRect(img image.Image) (image.Rectangle, error) {
 	cascade, err := ioutil.ReadFile("../cascade/facefinder")
 	if err != nil {
 		log.Fatalf("Error reading the cascade file: %v", err)
@@ -56,20 +54,18 @@ func GetLargestFaceRect(img image.Image) (image.Rectangle, error) {
 	faces := classifier.ClusterDetections(dets, 0.2)
 	log.Printf("detected %v faces!", len(faces))
 
-	return getBestFace(faces), nil
+	scoresToFaces := getScoresToFaceRectangles(faces)
+	var scores []float64
+	for k := range scoresToFaces {
+		scores = append(scores, k)
+	}
+	sort.Float64s(scores)
+	return scoresToFaces[scores[len(scores) - 1]], nil
 }
 
-// for now let's just pick the biggest rectangle, but maybe we'll incorporate the detection score (Detection.Q)
-func getBestFace(faceDetections []pigo.Detection) image.Rectangle {
-	var bestFaceRect image.Rectangle
-	var hiScore float32
+func getScoresToFaceRectangles(faceDetections []pigo.Detection) map[float64]image.Rectangle {
+	outMap := make(map[float64]image.Rectangle)
 	for _, face := range faceDetections {
-		//rect := image.Rect(
-		//	face.Col-face.Scale/2,
-		//	face.Row-face.Scale/2,
-		//	face.Scale,
-		//	face.Scale,
-		//)
 		rect := image.Rect(
 			face.Col-face.Scale/2,
 			face.Row-face.Scale/2,
@@ -77,12 +73,10 @@ func getBestFace(faceDetections []pigo.Detection) image.Rectangle {
 			face.Row+face.Scale/2,
 		)
 		log.Printf("found a face with dims: %s, score: %v", rect.String(), face.Q)
-		//if rect.Dx() * rect.Dy() > bestFaceRect.Dx() * bestFaceRect.Dy() {
-		if face.Q > hiScore {
-			bestFaceRect = rect
-		}
+		// let's try making score the detection score * area
+		score := float64(face.Q) * float64(rect.Dx() * rect.Dy())
+		outMap[score] = rect
 	}
-	log.Printf("the best face in the image has dimensions: %s", bestFaceRect.String())
-	return bestFaceRect
+	return outMap
 
 }
