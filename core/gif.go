@@ -6,11 +6,12 @@ import (
 	"image"
 	"image/color/palette"
 	"image/gif"
+	_ "image/jpeg"
 	_ "image/png"
 	"log"
 	"os"
-	"reflect"
-	"strconv"
+	"path/filepath"
+	"strings"
 	"sync"
 	"time"
 )
@@ -58,18 +59,9 @@ func logCheckpointTime(startTime time.Time, checkpoint *time.Duration, eventMsg 
 	*checkpoint = time.Since(startTime)
 }
 
-// TODO: make this take a flag for finding the n best faces, and concatting the gifs
-func main() {
+func CreateGif(inFile *os.File, numFrames int) string {
+
 	startTime := time.Now()
-	log.Println("starting")
-	if len(os.Args) != 3 {
-		panic("usage: gif.go $IN_FILE $NUM_FRAMES")
-	}
-	inFile, err := os.Open(os.Args[1])
-	panicIfError(err, "had trouble opening inFile")
-	numFrames, err := strconv.Atoi(os.Args[2])
-	panicIfError(err, "couldn't convert numFrames arg to int")
-	defer inFile.Close()
 	origImg, _, err := image.Decode(inFile)
 	panicIfError(err, "had trouble decoding inFile")
 	const delay = 5
@@ -79,10 +71,6 @@ func main() {
 	origQuantized := image.NewPaletted(origImg.Bounds(), palette.Plan9)
 	floydSteinbergDitherer.Quantize(origImg, origQuantized, 256, true, true)
 	logCheckpointTime(startTime, &checkpoint, "quantization / dithering of input image")
-	//colorquant.NoDither.Quantize(origImg, origQuantized, 256, false, true)
-	if reflect.DeepEqual(origQuantized.Palette, palette.Plan9) {
-		log.Printf("the quantized image still has the Plan9 palette! SAD!")
-	}
 	anim := gif.GIF{LoopCount: numFrames} // TODO: multiply this by numFaces
 	anim.Image = make([]*image.Paletted, numFrames)
 	anim.Delay = make([]int, numFrames)
@@ -118,15 +106,31 @@ func main() {
 	}
 	logCheckpointTime(startTime, &checkpoint, "concurrently created intermediate images")
 
-	outFile, err := os.Create("/tmp/test.gif")
+	outFileName := strings.TrimSuffix(inFile.Name(), filepath.Ext(inFile.Name())) + "_zoom.gif"
+	outFile, err := os.Create(outFileName)
 	panicIfError(err, "had trouble opening outFile")
 	defer outFile.Close()
 
 	err = gif.EncodeAll(outFile, &anim)
-	logCheckpointTime(startTime, &checkpoint, "created and encoded gif file")
+	logCheckpointTime(startTime, &checkpoint, "created and encoded gif file at " + outFileName)
 	panicIfError(err, "had trouble encoding outFile as gif")
 	log.Printf("finished in %vs", time.Since(startTime).Seconds())
+	return outFileName
 }
+
+// TODO: make this take a flag for finding the n best faces, and concatting the gifs
+//func main() {
+//	log.Println("starting")
+//	if len(os.Args) != 3 {
+//		panic("usage: gif.go $IN_FILE $NUM_FRAMES")
+//	}
+//	inFile, err := os.Open(os.Args[1])
+//	panicIfError(err, "had trouble opening inFile")
+//	numFrames, err := strconv.Atoi(os.Args[2])
+//	panicIfError(err, "couldn't convert numFrames arg to int")
+//	defer inFile.Close()
+//	CreateGif(inFile, numFrames)
+//}
 
 type CropResult struct {
 	// the indices in the gif in which to place the cropped / resized image

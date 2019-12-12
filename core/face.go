@@ -10,7 +10,7 @@ import (
 
 // TODO: make this return a slice of the N best face rects
 func GetBestFaceRect(img image.Image) (image.Rectangle, error) {
-	cascade, err := ioutil.ReadFile("../cascade/facefinder")
+	cascade, err := ioutil.ReadFile("/var/www/prettygood.dev/cascade/facefinder")
 	if err != nil {
 		log.Fatalf("Error reading the cascade file: %v", err)
 		return image.Rectangle{}, err
