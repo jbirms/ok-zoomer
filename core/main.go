@@ -68,6 +68,7 @@ func UrlToUrl(sess *session.Session, inputImageUrl string) (string, error) {
 		log.Fatalf("had trouble copying downloaded image to tempFile, err: %s", err.Error())
 		return "", err
 	}
+	tempFile.Seek(0, io.SeekStart)
 	_, err = uploader.Upload(&s3manager.UploadInput{
 		Body:                      tempFile,
 		Bucket:                    aws.String(S3Bucket),
@@ -77,6 +78,7 @@ func UrlToUrl(sess *session.Session, inputImageUrl string) (string, error) {
 		log.Fatalf("had trouble backing up input image to s3: err: %s", err.Error())
 		return "", err
 	}
+	tempFile.Seek(0, io.SeekStart)
 
 	// run the gif-making logic on the image
 	outputPath := CreateGif(tempFile, 20)
@@ -159,9 +161,9 @@ func setupRoutes() {
 	http.HandleFunc("/sms", GetTwilioHandler(awsSess))
 	http.HandleFunc("/upload", uploadFile)
 	//http.Handle("/temp-images/", http.StripPrefix("/temp-images/", http.FileServer(http.Dir("temp-images"))))
-	http.Handle(globalTempDir,
-		http.StripPrefix(globalTempDir,
-			http.FileServer(http.Dir(globalTempDir))))
+	//http.Handle(globalTempDir,
+	//	http.StripPrefix(globalTempDir,
+	//		http.FileServer(http.Dir(globalTempDir))))
 	http.ListenAndServe(":8080", nil)
 	fmt.Println("successfully set up routes!")
 }

@@ -66,6 +66,7 @@ func CreateGif(inFile *os.File, numFrames int) string {
 	startTime := time.Now()
 	origImg, _, err := image.Decode(inFile)
 	if err != nil {
+		log.Printf("hit an error: %s", err.Error())
 		// maybe it's an HEIC file, try that?
 		origImg, err = goheif.Decode(inFile)
 		if err != nil {

@@ -79,8 +79,10 @@ func GetTwilioHandler(sess *session.Session) func(w http.ResponseWriter, req *ht
 			fmt.Fprintf(rw, "ParseForm() err: %v", err)
 			return
 		}
-		log.Printf("received a message from %s, %s. NumMedia: %v",
-			req.Form.Get("FromCity"), req.Form.Get("FromState"), numMedia)
+		log.Printf("received a message from %s, %s. NumMedia: %v, Mime Type: %s",
+			req.Form.Get("FromCity"), req.Form.Get("FromState"),
+			numMedia,
+			req.Form.Get("MediaContentType0"))
 
 		rw.WriteHeader(200)
 		if numMedia == 0 {
