@@ -2,9 +2,15 @@ package main
 
 import (
 	"fmt"
+	"github.com/aws/aws-sdk-go/aws"
+	"github.com/aws/aws-sdk-go/aws/session"
+	"github.com/aws/aws-sdk-go/service/s3/s3manager"
+	"github.com/google/uuid"
 	"io"
 	"io/ioutil"
+	"log"
 	"net/http"
+	"os"
 )
 
 const imgEmbedFmt = `<html>
@@ -32,7 +38,66 @@ margin: auto;
 </body>
 </html>`
 
+//var globalTempDir = "/var/www/prettygood.dev/temp-images/"
 var globalTempDir = "/tmp/temp-images/"
+
+const (
+	S3Region = "us-east-1"
+	S3Bucket = "ok-zoomer-public-assets"
+)
+
+func UrlToUrl(sess *session.Session, inputImageUrl string) (string, error) {
+	uploader := s3manager.NewUploader(sess)
+
+	// download the image at inputImageUrl
+	randomName := uuid.New().String()
+	tempFile, err := ioutil.TempFile(globalTempDir, randomName + ".png")
+	if err != nil {
+		log.Fatalf("had trouble creating tempfile: %s", err.Error())
+		return "", err
+	}
+	defer tempFile.Close()
+	resp, err := http.Get(inputImageUrl)
+	defer resp.Body.Close()
+	if err != nil {
+		log.Fatalf("had trouble downloading image at %s: %s", inputImageUrl, err.Error())
+		return "", err
+	}
+	_, err = io.Copy(tempFile, resp.Body)
+	if err != nil {
+		log.Fatalf("had trouble copying downloaded image to tempFile, err: %s", err.Error())
+		return "", err
+	}
+	_, err = uploader.Upload(&s3manager.UploadInput{
+		Body:                      tempFile,
+		Bucket:                    aws.String(S3Bucket),
+		Key:                       aws.String(fmt.Sprintf("/raw-images/%s.png", randomName)),
+	})
+	if err != nil {
+		log.Fatalf("had trouble backing up input image to s3: err: %s", err.Error())
+		return "", err
+	}
+
+	// run the gif-making logic on the image
+	outputPath := CreateGif(tempFile, 20)
+
+	// upload the result to s3
+	outputFile, err := os.Open(outputPath)
+	if err != nil {
+		log.Fatalf("had trouble opening the file at %s, err: %s", outputPath, err.Error())
+		return "", err
+	}
+	defer outputFile.Close()
+	result, err := uploader.Upload(&s3manager.UploadInput{
+		Body:                      outputFile,
+		Bucket:                    aws.String(S3Bucket),
+		Key:                       aws.String(fmt.Sprintf("/gifs/%s.gif", randomName)),
+	})
+
+	// return the url to the gif object on s3
+	return result.Location, nil
+
+}
 
 func uploadFile(w http.ResponseWriter, r *http.Request) {
 	fmt.Println("File Upload Endpoint Hit")
@@ -63,7 +128,7 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 
 	// Create a temporary file within our temp-images directory that follows
 	// a particular naming pattern
-	tempFile, err := ioutil.TempFile("temp-images", "upload-*.png")
+	tempFile, err := ioutil.TempFile(globalTempDir, "upload-*.png")
 	if err != nil {
 		fmt.Println(err)
 	}
@@ -80,16 +145,18 @@ func uploadFile(w http.ResponseWriter, r *http.Request) {
 	tempFile.Seek(0, io.SeekStart)
 
 	// create the dang gif
-	outputPath := CreateGif(tempFile, 16)
+	outputPath := CreateGif(tempFile, 20)
 	// return that we have successfully uploaded our file!
-	//fmt.Fprintf(w, "Successfully Uploaded File at %s\n", outputPath)
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
-	//fmt.Fprintf(w, "<img src=\"%s\" alt=\"test\">", outputPath)
 
 	fmt.Fprintf(w, imgEmbedFmt, outputPath)
 }
 
 func setupRoutes() {
+	awsSess := session.Must(session.NewSession(&aws.Config{
+		Region: aws.String(S3Region),
+	}))
+	http.HandleFunc("/sms", GetTwilioHandler(awsSess))
 	http.HandleFunc("/upload", uploadFile)
 	//http.Handle("/temp-images/", http.StripPrefix("/temp-images/", http.FileServer(http.Dir("temp-images"))))
 	http.Handle(globalTempDir,

@@ -3,6 +3,7 @@ package main
 import (
 	"fmt"
 	"github.com/esimov/colorquant"
+	"github.com/jdeng/goheif"
 	"image"
 	"image/color/palette"
 	"image/gif"
@@ -54,7 +55,8 @@ func panicIfError(err error, panicString string) {
 func logCheckpointTime(startTime time.Time, checkpoint *time.Duration, eventMsg string) {
 	dur := time.Since(startTime) - *checkpoint
 	if dur > minLoggedDuration {
-		log.Printf("ran %s in %vs", eventMsg, dur.Seconds())
+		msg := fmt.Sprintf("ran %s in %vs", eventMsg, dur.Seconds())
+		log.Println(msg)
 	}
 	*checkpoint = time.Since(startTime)
 }
@@ -63,7 +65,14 @@ func CreateGif(inFile *os.File, numFrames int) string {
 
 	startTime := time.Now()
 	origImg, _, err := image.Decode(inFile)
-	panicIfError(err, "had trouble decoding inFile")
+	if err != nil {
+		// maybe it's an HEIC file, try that?
+		origImg, err = goheif.Decode(inFile)
+		if err != nil {
+			// ok, now we panic
+			panicIfError(err, "had trouble decoding inFile")
+		}
+	}
 	const delay = 5
 
 	checkpoint := time.Since(startTime)
