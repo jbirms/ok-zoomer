@@ -46,7 +46,7 @@ const (
 	S3Bucket = "ok-zoomer-public-assets"
 )
 
-func UrlToUrl(sess *session.Session, inputImageUrl string) (string, error) {
+func UrlToUrl(sess *session.Session, inputImageUrl, origPhoneNumber string) (string, error) {
 	uploader := s3manager.NewUploader(sess)
 
 	// download the image at inputImageUrl
@@ -80,8 +80,8 @@ func UrlToUrl(sess *session.Session, inputImageUrl string) (string, error) {
 	}
 	tempFile.Seek(0, io.SeekStart)
 
-	// run the gif-making logic on the image
-	outputPath := CreateGif(tempFile, 20)
+	// run the gif-making logic on the image, 26 frames was chosen rather arbitrarily
+	outputPath := CreateGif(tempFile, 26)
 
 	// upload the result to s3
 	outputFile, err := os.Open(outputPath)
@@ -97,6 +97,7 @@ func UrlToUrl(sess *session.Session, inputImageUrl string) (string, error) {
 	})
 
 	// return the url to the gif object on s3
+	log.Printf("message from %s generated %s", origPhoneNumber, result.Location)
 	return result.Location, nil
 
 }

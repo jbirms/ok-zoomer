@@ -4,19 +4,18 @@ import (
 	"encoding/base64"
 	"fmt"
 	"github.com/aws/aws-sdk-go/aws/session"
-	"os"
-	"strconv"
-	"strings"
-
-	//"io/ioutil"
 	"log"
 	"net/http"
 	"net/url"
+	"os"
+	"strconv"
+	"strings"
 )
 
 type TwilioClient struct {
 	AccountId 	string
 	APIKey 		string
+	PhoneNumber	string
 }
 
 func LoadTwilioConfigFromEnv() (TwilioClient, error) {
@@ -29,7 +28,11 @@ func LoadTwilioConfigFromEnv() (TwilioClient, error) {
 	if !ok {
 		return TwilioClient{}, fmt.Errorf("missing TWILIO_API_KEY")
 	}
-	return TwilioClient{acctId, apiKey}, nil
+	phoneNumber, ok := os.LookupEnv("TWILIO_PHONE_NUMBER")
+	if !ok {
+		return TwilioClient{}, fmt.Errorf("missing TWILIO_PHONE_NUMBER")
+	}
+	return TwilioClient{acctId, apiKey, phoneNumber}, nil
 }
 
 func basicAuth(username, password string) string {
@@ -42,7 +45,7 @@ func (tw *TwilioClient) SendMessage(toNumber, messageText string) error {
 		tw.AccountId)
 	data := url.Values{}
 	data.Set("Body", messageText)
-	data.Set("From", "+14142929507")
+	data.Set("From", tw.PhoneNumber)
 	data.Set("To", toNumber)
 
 	client := &http.Client{}
@@ -98,8 +101,7 @@ func GetTwilioHandler(sess *session.Session) func(w http.ResponseWriter, req *ht
 				err = twilioClient.SendMessage(fromNumber, "You sent multiple pieces of media, only handling the first one!")
 			}
 			dataUrl := req.FormValue("MediaUrl0")
-			twilioClient.SendMessage(fromNumber, "you send us a piece of media: " + dataUrl)
-			gifUrl, err := UrlToUrl(sess, dataUrl)
+			gifUrl, err := UrlToUrl(sess, dataUrl, fromNumber)
 			if err != nil {
 				log.Fatalf("had trouble generating the url: %s", err.Error())
 			}

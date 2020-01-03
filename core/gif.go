@@ -3,7 +3,6 @@ package main
 import (
 	"fmt"
 	"github.com/esimov/colorquant"
-	"github.com/jdeng/goheif"
 	"image"
 	"image/color/palette"
 	"image/gif"
@@ -67,12 +66,7 @@ func CreateGif(inFile *os.File, numFrames int) string {
 	origImg, _, err := image.Decode(inFile)
 	if err != nil {
 		log.Printf("hit an error: %s", err.Error())
-		// maybe it's an HEIC file, try that?
-		origImg, err = goheif.Decode(inFile)
-		if err != nil {
-			// ok, now we panic
-			panicIfError(err, "had trouble decoding inFile")
-		}
+		panicIfError(err, "had trouble decoding inFile")
 	}
 	const delay = 5
 
